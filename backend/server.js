@@ -14,6 +14,7 @@ const {
   findCategory,
   findCommentary,
   categoryTransform,
+  parseKaspiPageRows,
 } = require('./pdfScan');
 
 const Transaction = require('./models/Transaction');
@@ -515,7 +516,7 @@ async function aboutTransaction(docItems, bankName, userId, options = {}) {
   const totalPages = docItems.length > 0 ? Math.max(...docItems.map((i) => i.page)) : 0;
 
   let globalTransactionNum = 1;
-  let totalSavedTransactions = 0;
+  const allTransactions = [];
 
   const cardElement = docItems.find(
     (item) =>
@@ -529,88 +530,48 @@ async function aboutTransaction(docItems, bankName, userId, options = {}) {
     : 'Данные не найдены';
 
   for (let i = 2; i <= totalPages; i += 1) {
-    let pageTransactions = [];
     const currentPageItems = docItems.filter((item) => item.page === i);
-    
-    let dataAfterMarker = currentPageItems;
+    const parsedRows = parseKaspiPageRows(currentPageItems, i);
 
-    // На 2-й странице ищем маркер заголовков таблицы
-    if (i === 2) {
-      const searchMarker = currentPageItems.findIndex((item) =>
-        item.str.toUpperCase().includes('ОПЕРАЦИЯ') || item.str.toUpperCase().includes('ДАТА')
-      );
-      if (searchMarker !== -1) {
-        dataAfterMarker = currentPageItems.slice(searchMarker + 1);
-      }
-    } else {
-      // На страницах 3+ таблица идет с самого верха, пропускаем только верхний колонтитул справки
-      const contentStartIndex = currentPageItems.findIndex((item) =>
-        !item.str.includes('Приложение к Справке') && !item.str.includes('www.kaspi.kz')
-      );
-      if (contentStartIndex !== -1) {
-        dataAfterMarker = currentPageItems.slice(contentStartIndex);
-      }
-    }
+    for (let j = 0; j < parsedRows.length; j += 1) {
+      const row = parsedRows[j];
+      const categoryKey = categoryTransform(row.operation, row.commentary, row.cleanAmount);
 
-    let occurrence = 1;
-    let found = true;
-    const rawPageData = [];
-
-    while (found) {
-      const dateData = findDateByOccurrence(dataAfterMarker, occurrence);
-      const rawMoneyData = findMoney(dataAfterMarker, occurrence);
-      const categoryData = findCategory(dataAfterMarker, occurrence);
-      const commentaryData = findCommentary(dataAfterMarker, occurrence);
-
-      if (dateData && rawMoneyData) {
-        rawPageData.push({
-          dateStr: dateData.item.str,
-          money: rawMoneyData,
-          category: categoryData,
-          commentary: commentaryData,
-        });
-        occurrence += 1;
-      } else {
-        found = false;
-      }
-    }
-
-    for (let j = 0; j < rawPageData.length; j += 1) {
-      const item = rawPageData[j];
-      const cleanAmount = parseMoneyToNumber(item.money.amount);
-      const rawCategory = item.category || 'Не определено';
-      const categoryDataTransformed = categoryTransform(rawCategory);
-
-      pageTransactions.push({
+      allTransactions.push({
         ...extraFields,
-        date: parseDate(item.dateStr),
-        amount: cleanAmount,
+        date: parseDate(row.dateStr),
+        amount: row.cleanAmount,
         balance: null,
-        category: rawCategory,
-        categoryInfo: categoryDataTransformed,
+        category: row.operation || (row.cleanAmount > 0 ? 'Пополнение' : 'Покупка'),
+        categoryInfo: categoryKey,
         bank: `${bankName} ${cardNumber}`.trim(),
-        commentary: item.commentary || 'Комментарий не найден',
+        commentary: row.commentary || 'Детали не указаны',
         page: i,
         transactionNum: globalTransactionNum,
         userId,
       });
       globalTransactionNum += 1;
     }
+  }
 
-    if (pageTransactions.length > 0) {
-      try {
-        await TransactionModel.insertMany(pageTransactions);
-        totalSavedTransactions += pageTransactions.length;
-        console.log(`✅ Страница ${i}: сохранено ${pageTransactions.length} транзакций`);
-      } catch (err) {
-        console.error(`❌ Ошибка записи страницы ${i}:`, err);
+  if (allTransactions.length > 0) {
+    try {
+      console.time('⚡ Пакетная вставка в MongoDB');
+      const insertResult = await TransactionModel.insertMany(allTransactions, { ordered: false });
+      console.timeEnd('⚡ Пакетная вставка в MongoDB');
+      const totalSaved = insertResult ? insertResult.length : allTransactions.length;
+      console.log(`✅ Успешно сохранено ${totalSaved} транзакций одним пакетным запросом`);
+      return totalSaved;
+    } catch (err) {
+      console.error('❌ Ошибка пакетной записи в MongoDB:', err);
+      if (err.insertedDocs && err.insertedDocs.length > 0) {
+        return err.insertedDocs.length;
       }
-    } else {
-      console.log(`⚠️ Страница ${i}: транзакции не найдены`);
+      throw err;
     }
   }
 
-  return totalSavedTransactions;
+  return 0;
 }
 
 const PORT = process.env.PORT || 5000;

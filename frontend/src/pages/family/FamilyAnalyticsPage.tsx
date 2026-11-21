@@ -567,6 +567,7 @@ export default function FamilyAnalyticsPage() {
   const [customFrom, setCustomFrom] = useState("2000-01-01");
   const [customTo, setCustomTo] = useState(formatDateInput(new Date()));
   const [selectedMemberId, setSelectedMemberId] = useState("all");
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [operationsPage, setOperationsPage] = useState(1);
@@ -637,7 +638,17 @@ export default function FamilyAnalyticsPage() {
 
   useEffect(() => {
     setOperationsPage(1);
+    setSelectedCategories([]);
   }, [selectedPeriod, customFrom, customTo, selectedMemberId]);
+
+  const handleToggleCategory = (categoryKey: string) => {
+    setSelectedCategories((prev) =>
+      prev.includes(categoryKey)
+        ? prev.filter((item) => item !== categoryKey)
+        : [...prev, categoryKey]
+    );
+    setOperationsPage(1);
+  };
 
   const filteredTransactions = useMemo(() => {
     const periodFiltered = filterTransactionsByDate(transactions, dateFrom, dateTo);
@@ -650,6 +661,18 @@ export default function FamilyAnalyticsPage() {
       (transaction) => transaction.userId === selectedMemberId,
     );
   }, [dateFrom, dateTo, selectedMemberId, transactions]);
+
+  const operationsFiltered = useMemo(() => {
+    if (selectedCategories.length === 0) {
+      return filteredTransactions;
+    }
+
+    return filteredTransactions.filter(
+      (transaction) =>
+        selectedCategories.includes(transaction.categoryLabel) ||
+        selectedCategories.includes(transaction.category)
+    );
+  }, [filteredTransactions, selectedCategories]);
 
   const income = useMemo(
     () =>
@@ -695,10 +718,10 @@ export default function FamilyAnalyticsPage() {
 
   const totalOperationPages = Math.max(
     1,
-    Math.ceil(filteredTransactions.length / OPERATIONS_PER_PAGE),
+    Math.ceil(operationsFiltered.length / OPERATIONS_PER_PAGE),
   );
   const safeOperationsPage = Math.min(operationsPage, totalOperationPages);
-  const visibleTransactions = filteredTransactions.slice(
+  const visibleTransactions = operationsFiltered.slice(
     (safeOperationsPage - 1) * OPERATIONS_PER_PAGE,
     safeOperationsPage * OPERATIONS_PER_PAGE,
   );
@@ -706,12 +729,12 @@ export default function FamilyAnalyticsPage() {
     safeOperationsPage,
     totalOperationPages,
   );
-  const rangeFrom = filteredTransactions.length
+  const rangeFrom = operationsFiltered.length
     ? (safeOperationsPage - 1) * OPERATIONS_PER_PAGE + 1
     : 0;
   const rangeTo = Math.min(
     safeOperationsPage * OPERATIONS_PER_PAGE,
-    filteredTransactions.length,
+    operationsFiltered.length,
   );
 
   const handlePeriodClick = (periodId: PeriodId) => {
@@ -907,12 +930,16 @@ export default function FamilyAnalyticsPage() {
           items={expenseCategories}
           emptyText="Расходов за выбранный период нет"
           type="expense"
+          selectedCategories={selectedCategories}
+          onToggleCategory={handleToggleCategory}
         />
         <CategoryBlock
           title="Доходы по категориям"
           items={incomeCategories}
           emptyText="Доходов за выбранный период нет"
           type="income"
+          selectedCategories={selectedCategories}
+          onToggleCategory={handleToggleCategory}
         />
       </section>
 
@@ -977,12 +1004,29 @@ export default function FamilyAnalyticsPage() {
               Все операции
             </h2>
             <p className="operations-list__subtitle">
-              Операции за выбранный период и выбранных участников
+              {selectedCategories.length > 0
+                ? `Фильтр по категориям (${selectedCategories.length}) · нажмите на категорию, чтобы снять`
+                : "Операции за выбранный период и выбранных участников"}
             </p>
           </div>
-          <span className="operations-list__count">
-            {filteredTransactions.length}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {selectedCategories.length > 0 && (
+              <button
+                type="button"
+                className="period-chip"
+                style={{ padding: "4px 10px", fontSize: "12px", height: "auto" }}
+                onClick={() => {
+                  setSelectedCategories([]);
+                  setOperationsPage(1);
+                }}
+              >
+                Сбросить фильтр ✕
+              </button>
+            )}
+            <span className="operations-list__count">
+              {operationsFiltered.length}
+            </span>
+          </div>
         </div>
 
         {isLoading ? (
@@ -1094,11 +1138,15 @@ function CategoryBlock({
   items,
   emptyText,
   type,
+  selectedCategories = [],
+  onToggleCategory,
 }: {
   title: string;
   items: CategoryItem[];
   emptyText: string;
   type: "income" | "expense";
+  selectedCategories?: string[];
+  onToggleCategory?: (categoryKey: string) => void;
 }) {
   return (
     <section className="panel analytics-category-card">
@@ -1106,34 +1154,61 @@ function CategoryBlock({
 
       {items.length > 0 ? (
         <div className="analytics-category-list">
-          {items.map((item) => (
-            <article className="analytics-category-row" key={item.key}>
-              <div className="analytics-category-row__main">
-                <div className="analytics-category-row__top">
-                  <strong>{item.label}</strong>
-                  <span>{item.percent}%</span>
+          {items.map((item) => {
+            const isSelected = selectedCategories.includes(item.key);
+            return (
+              <article
+                className={`analytics-category-row ${isSelected ? "active" : ""}`}
+                key={item.key}
+                onClick={() => onToggleCategory?.(item.key)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onToggleCategory?.(item.key);
+                  }
+                }}
+                title={
+                  isSelected
+                    ? "Нажмите, чтобы снять выбор с этой категории"
+                    : "Нажмите, чтобы отфильтровать список по этой категории"
+                }
+              >
+                <div className="analytics-category-row__main">
+                  <div className="analytics-category-row__top">
+                    <strong>
+                      {isSelected && (
+                        <span style={{ color: "#0f5685", marginRight: "6px" }}>
+                          ✓
+                        </span>
+                      )}
+                      {item.label}
+                    </strong>
+                    <span>{item.percent}%</span>
+                  </div>
+                  <div
+                    className="analytics-category-progress"
+                    aria-hidden="true"
+                  >
+                    <span
+                      className={`analytics-category-progress__fill ${
+                        type === "income" ? "green" : "red"
+                      }`}
+                      style={{ width: `${Math.min(item.percent, 100)}%` }}
+                    />
+                  </div>
                 </div>
                 <div
-                  className="analytics-category-progress"
-                  aria-hidden="true"
+                  className={`analytics-category-row__amount ${
+                    type === "income" ? "green" : "red"
+                  }`}
                 >
-                  <span
-                    className={`analytics-category-progress__fill ${
-                      type === "income" ? "green" : "red"
-                    }`}
-                    style={{ width: `${Math.min(item.percent, 100)}%` }}
-                  />
+                  {formatMoney(item.value)}
                 </div>
-              </div>
-              <div
-                className={`analytics-category-row__amount ${
-                  type === "income" ? "green" : "red"
-                }`}
-              >
-                {formatMoney(item.value)}
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       ) : (
         <p className="member-mail">{emptyText}</p>

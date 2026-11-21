@@ -4010,9 +4010,24 @@ button.show-more {
   align-items: center;
   gap: 18px;
   padding: 14px 16px;
-  border: 1px solid rgba(11, 79, 126, 0.1);
+  border: 2px solid rgba(11, 79, 126, 0.1);
   border-radius: 18px;
   background: rgba(245, 249, 254, 0.86);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.analytics-category-row:hover {
+  border-color: rgba(15, 86, 133, 0.35);
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.analytics-category-row.active {
+  border-color: #0f5685;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(15, 86, 133, 0.15);
 }
 
 .analytics-category-row__main {

@@ -211,6 +211,22 @@
 .analytics-category-row {
   display: grid;
   gap: 7px;
+  cursor: pointer;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 2px solid transparent;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.analytics-category-row:hover {
+  background: rgba(15, 86, 133, 0.04);
+}
+
+.analytics-category-row.active {
+  background: #ffffff;
+  border-color: #0f5685;
+  box-shadow: 0 4px 14px rgba(15, 86, 133, 0.12);
 }
 
 .analytics-category-line,
